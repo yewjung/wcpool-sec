@@ -4,11 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"os"
 	"sec/models"
-	"time"
-
-	"github.com/golang-jwt/jwt"
 )
 
 type SecurityController struct{}
@@ -35,14 +31,15 @@ func (sc *SecurityController) VerifyUser(db *sql.DB) http.HandlerFunc {
 		}
 
 		// verify user's credentials
-		err = user.VerifyUser(db)
+		authUserService := AuthUserService{}
+		err = authUserService.VerifyUser(db, user)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
 		// generate JWT token
-		token, err := user.GenerateToken()
+		token, err := authUserService.GenerateToken(user)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -65,14 +62,15 @@ func (sc *SecurityController) CreateUser(db *sql.DB) http.HandlerFunc {
 		}
 
 		// create user's account
-		err = user.CreateUser(db)
+		authUserService := AuthUserService{}
+		err = authUserService.CreateUser(db, user)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		// generate JWT token
-		token, err := user.GenerateToken()
+		token, err := authUserService.GenerateToken(user)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -88,25 +86,9 @@ func (sc *SecurityController) RefreshToken(db *sql.DB) http.HandlerFunc {
 		// retrieve token strings from request header
 		tokenString := r.Header.Get("Authorization")
 
-		// Parse token string and check if it's valid and retrieve the claim from
-		claim := models.Claims{}
-		token, err := jwt.ParseWithClaims(tokenString, &claim, func(token *jwt.Token) (interface{}, error) {
-			// get secret from os environment variable
-			return []byte(os.Getenv("SECRET")), nil
-		},
-		)
-		if err != nil || !token.Valid {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		// if token is still valid before the expiry date, generate a new token
-		if claim.ExpiresAt > time.Now().Unix() {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		claim.ExpiresAt = time.Now().Add(time.Minute * 10).Unix()
-		token = jwt.NewWithClaims(jwt.SigningMethodHS256, claim)
-		tokenString, err = token.SignedString([]byte(os.Getenv("SECRET")))
+		authUserService := AuthUserService{}
+		tokenString, err := authUserService.RefreshToken(db, tokenString)
+
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
