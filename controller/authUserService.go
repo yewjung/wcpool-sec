@@ -6,7 +6,7 @@ import (
 	"os"
 	"sec/constants"
 	"sec/models"
-	authUserRepo "sec/repository/authUser"
+	passwordRepo "sec/repository/password"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -26,7 +26,7 @@ func (authUserService *AuthUserService) CreateUser(db *sql.DB, user models.User)
 		PasswordHash: string(hashedPassword),
 	}
 
-	authRepo := authUserRepo.AuthUserRepo{}
+	authRepo := passwordRepo.PasswordRepo{}
 	err = authRepo.CreateUser(db, &authUser)
 	if err != nil {
 		return err
@@ -51,14 +51,15 @@ func (authUserService *AuthUserService) GenerateToken(user models.User) (string,
 
 // verify user
 func (authUserService *AuthUserService) VerifyUser(db *sql.DB, user models.User) error {
-	var authUser models.AuthUser
 
-	authRepo := authUserRepo.AuthUserRepo{}
-	if !authRepo.UserExist(db, user.Email) {
+	authRepo := passwordRepo.PasswordRepo{}
+	authUser, err := authRepo.GetUser(db, user.Email)
+	if err != nil {
 		// server error
-		return errors.New("server error")
+		return err
 	}
-	err := bcrypt.CompareHashAndPassword(
+
+	err = bcrypt.CompareHashAndPassword(
 		[]byte(authUser.PasswordHash),
 		[]byte(user.Password))
 
@@ -67,6 +68,12 @@ func (authUserService *AuthUserService) VerifyUser(db *sql.DB, user models.User)
 	}
 
 	return nil
+}
+
+// check if user exist
+func (authUserService *AuthUserService) IsUserExist(db *sql.DB, email string) bool {
+	authRepo := passwordRepo.PasswordRepo{}
+	return authRepo.UserExist(db, email)
 }
 
 // refresh token
@@ -80,8 +87,8 @@ func (authUserService *AuthUserService) RefreshToken(db *sql.DB, tokenString str
 		return "", errors.New("invalid token")
 	}
 	// if token is still valid before the expiry date, generate a new token
-	if claims.ExpiresAt > time.Now().Unix() {
-		return "", errors.New("token is still valid before the expiry date")
+	if claims.ExpiresAt < time.Now().Unix() {
+		return "", errors.New("token has expired. Please sign in again")
 	}
 	claims.ExpiresAt = time.Now().Add(time.Minute * 10).Unix()
 	token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

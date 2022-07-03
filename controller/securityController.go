@@ -3,13 +3,17 @@ package controller
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sec/models"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type SecurityController struct{}
 
-// VerifyUser is a function that verifies the user's credentials
+// Login is a function that verifies the user's credentials
 // and returns a JWT token if the user is valid.
 //
 // Parameters:
@@ -19,7 +23,7 @@ type SecurityController struct{}
 // Returns:
 // 		- token: JWT token
 // 		- err: error
-func (sc *SecurityController) VerifyUser(db *sql.DB) http.HandlerFunc {
+func (sc *SecurityController) Login(db *sql.DB, mongoDB *mongo.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var user models.User
 
@@ -35,6 +39,15 @@ func (sc *SecurityController) VerifyUser(db *sql.DB) http.HandlerFunc {
 		err = authUserService.VerifyUser(db, user)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
+			log.Default().Panic(err)
+			return
+		}
+
+		// update last login
+		accountService := AccountService{}
+		_, err = accountService.UpdateLastLogin(mongoDB, user.Email)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
@@ -50,7 +63,7 @@ func (sc *SecurityController) VerifyUser(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func (sc *SecurityController) CreateUser(db *sql.DB) http.HandlerFunc {
+func (sc *SecurityController) CreateUser(db *sql.DB, mongoDB *mongo.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var user models.User
 
@@ -61,11 +74,28 @@ func (sc *SecurityController) CreateUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// create user's account
 		authUserService := AuthUserService{}
+		// check if user already exist
+		if authUserService.IsUserExist(db, user.Email) {
+			json.NewEncoder(w).Encode(models.Error{ErrorMessage: "User already exists"})
+			return
+		}
+
+		// create user's password record in postgres
 		err = authUserService.CreateUser(db, user)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			log.Default().Panic(err)
+			return
+		}
+
+		// create new account in mongoDB
+		accountService := AccountService{}
+		newAccount := models.Account{Email: user.Email, LastLogin: time.Now(), CrtDt: time.Now()}
+		_, err = accountService.CreateAccount(mongoDB, newAccount)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Default().Panic(err)
 			return
 		}
 
@@ -91,6 +121,7 @@ func (sc *SecurityController) RefreshToken(db *sql.DB) http.HandlerFunc {
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			log.Default().Panic(err)
 			return
 		}
 		json.NewEncoder(w).Encode(tokenString)
