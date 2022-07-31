@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+
+option go_package = "sec/authorization";
+
+package authorization; 
+
+
+service Authorization {
+    rpc VerifyPartyID(Verification) returns (VerificationResult) {}
+}
+
+message Verification {
+    string token = 1;
+    string partyid = 2;
+    repeated Option options = 3;
+}
+
+enum Option {
+    PARTY_ID = 0;
+    IS_ADMIN = 1;
+}
+
+message VerificationResult {
+    bool ok = 1;
+    string email = 2;
+}

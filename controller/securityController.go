@@ -1,17 +1,16 @@
 package controller
 
 import (
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
 	"sec/models"
 	"time"
-
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
-type SecurityController struct{}
+type SecurityController struct {
+	Storage models.Storage
+}
 
 // Login is a function that verifies the user's credentials
 // and returns a JWT token if the user is valid.
@@ -23,9 +22,9 @@ type SecurityController struct{}
 // Returns:
 // 		- token: JWT token
 // 		- err: error
-func (sc *SecurityController) Login(db *sql.DB, mongoDB *mongo.Client) http.HandlerFunc {
+func (sc *SecurityController) Login() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var user models.User
+		var user models.UserDTO
 
 		// get user's credentials
 		err := json.NewDecoder(r.Body).Decode(&user)
@@ -35,8 +34,8 @@ func (sc *SecurityController) Login(db *sql.DB, mongoDB *mongo.Client) http.Hand
 		}
 
 		// verify user's credentials
-		authUserService := AuthUserService{}
-		err = authUserService.VerifyUser(db, user)
+		authUserService := AuthUserService{DB: sc.Storage.PostgresUserDB}
+		err = authUserService.VerifyUser(user)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			log.Default().Panic(err)
@@ -44,8 +43,8 @@ func (sc *SecurityController) Login(db *sql.DB, mongoDB *mongo.Client) http.Hand
 		}
 
 		// update last login
-		accountService := AccountService{}
-		_, err = accountService.UpdateLastLogin(mongoDB, user.Email)
+		accountService := AccountService{MongoDB: sc.Storage.MongoAccountDB}
+		_, err = accountService.UpdateLastLogin(user.Email)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -63,9 +62,9 @@ func (sc *SecurityController) Login(db *sql.DB, mongoDB *mongo.Client) http.Hand
 	}
 }
 
-func (sc *SecurityController) CreateUser(db *sql.DB, mongoDB *mongo.Client) http.HandlerFunc {
+func (sc *SecurityController) CreateUser() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var user models.User
+		var user models.UserDTO
 
 		// get user's credentials
 		err := json.NewDecoder(r.Body).Decode(&user)
@@ -74,15 +73,15 @@ func (sc *SecurityController) CreateUser(db *sql.DB, mongoDB *mongo.Client) http
 			return
 		}
 
-		authUserService := AuthUserService{}
+		authUserService := AuthUserService{DB: sc.Storage.PostgresUserDB}
 		// check if user already exist
-		if authUserService.IsUserExist(db, user.Email) {
+		if authUserService.IsUserExist(user.Email) {
 			json.NewEncoder(w).Encode(models.Error{ErrorMessage: "User already exists"})
 			return
 		}
 
 		// create user's password record in postgres
-		err = authUserService.CreateUser(db, user)
+		err = authUserService.CreateUser(user)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Default().Panic(err)
@@ -90,9 +89,9 @@ func (sc *SecurityController) CreateUser(db *sql.DB, mongoDB *mongo.Client) http
 		}
 
 		// create new account in mongoDB
-		accountService := AccountService{}
+		accountService := AccountService{MongoDB: sc.Storage.MongoAccountDB}
 		newAccount := models.Account{Email: user.Email, LastLogin: time.Now(), CrtDt: time.Now()}
-		_, err = accountService.CreateAccount(mongoDB, newAccount)
+		_, err = accountService.CreateAccount(newAccount)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Default().Panic(err)
@@ -111,13 +110,13 @@ func (sc *SecurityController) CreateUser(db *sql.DB, mongoDB *mongo.Client) http
 	}
 }
 
-func (sc *SecurityController) RefreshToken(db *sql.DB) http.HandlerFunc {
+func (sc *SecurityController) RefreshToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// retrieve token strings from request header
 		tokenString := r.Header.Get("Authorization")
 
-		authUserService := AuthUserService{}
-		tokenString, err := authUserService.RefreshToken(db, tokenString)
+		authUserService := AuthUserService{DB: sc.Storage.PostgresUserDB}
+		tokenString, err := authUserService.RefreshToken(tokenString)
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

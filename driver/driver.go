@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/go-redis/redis/v9"
 	_ "github.com/lib/pq"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -42,4 +43,12 @@ func ConnectMongoDB() *mongo.Client {
 	}
 	fmt.Println("MongoDB successfully connected and pinged.")
 	return client
+}
+
+func ConnectRedis() *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     "redis:6379",
+		Password: "",
+		DB:       0,
+	})
 }

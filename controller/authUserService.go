@@ -13,11 +13,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type AuthUserService struct{}
+type AuthUserService struct {
+	DB *sql.DB
+}
 
 // create user
-func (authUserService *AuthUserService) CreateUser(db *sql.DB, user models.User) error {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+func (authUserService *AuthUserService) CreateUser(user models.UserDTO) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 12)
 	if err != nil {
 		return err
 	}
@@ -26,8 +28,8 @@ func (authUserService *AuthUserService) CreateUser(db *sql.DB, user models.User)
 		PasswordHash: string(hashedPassword),
 	}
 
-	authRepo := passwordRepo.PasswordRepo{}
-	err = authRepo.CreateUser(db, &authUser)
+	authRepo := passwordRepo.PasswordRepo{DB: authUserService.DB}
+	err = authRepo.CreateUser(&authUser)
 	if err != nil {
 		return err
 	}
@@ -36,7 +38,7 @@ func (authUserService *AuthUserService) CreateUser(db *sql.DB, user models.User)
 }
 
 // generate token
-func (authUserService *AuthUserService) GenerateToken(user models.User) (string, error) {
+func (authUserService *AuthUserService) GenerateToken(user models.UserDTO) (string, error) {
 	claims := models.Claims{
 		Email: user.Email,
 		StandardClaims: jwt.StandardClaims{
@@ -50,10 +52,10 @@ func (authUserService *AuthUserService) GenerateToken(user models.User) (string,
 }
 
 // verify user
-func (authUserService *AuthUserService) VerifyUser(db *sql.DB, user models.User) error {
+func (authUserService *AuthUserService) VerifyUser(user models.UserDTO) error {
 
-	authRepo := passwordRepo.PasswordRepo{}
-	authUser, err := authRepo.GetUser(db, user.Email)
+	authRepo := passwordRepo.PasswordRepo{DB: authUserService.DB}
+	authUser, err := authRepo.GetUser(user.Email)
 	if err != nil {
 		// server error
 		return err
@@ -61,7 +63,8 @@ func (authUserService *AuthUserService) VerifyUser(db *sql.DB, user models.User)
 
 	err = bcrypt.CompareHashAndPassword(
 		[]byte(authUser.PasswordHash),
-		[]byte(user.Password))
+		[]byte(user.Password),
+	)
 
 	if err != nil {
 		return err
@@ -71,13 +74,13 @@ func (authUserService *AuthUserService) VerifyUser(db *sql.DB, user models.User)
 }
 
 // check if user exist
-func (authUserService *AuthUserService) IsUserExist(db *sql.DB, email string) bool {
-	authRepo := passwordRepo.PasswordRepo{}
-	return authRepo.UserExist(db, email)
+func (authUserService *AuthUserService) IsUserExist(email string) bool {
+	authRepo := passwordRepo.PasswordRepo{DB: authUserService.DB}
+	return authRepo.UserExist(email)
 }
 
 // refresh token
-func (authUserService *AuthUserService) RefreshToken(db *sql.DB, tokenString string) (string, error) {
+func (authUserService *AuthUserService) RefreshToken(tokenString string) (string, error) {
 	claims := models.Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
 		// get secret from os environment variable
@@ -98,4 +101,20 @@ func (authUserService *AuthUserService) RefreshToken(db *sql.DB, tokenString str
 	}
 
 	return tokenString, nil
+}
+
+func (authUserService *AuthUserService) IsTokenStillValid(tokenString string) (bool, string) {
+	claims := models.Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		// get secret from os environment variable
+		return []byte(os.Getenv(constants.JWT_SECRET)), nil
+	})
+	if err != nil || !token.Valid {
+		return false, ""
+	}
+	// check if token has expired
+	if claims.ExpiresAt < time.Now().Unix() {
+		return false, ""
+	}
+	return true, claims.Email
 }
