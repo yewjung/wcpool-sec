@@ -74,5 +74,5 @@ func (as *AccountService) FindByEmail(email string) models.Account {
 }
 
 func constructPermissionKey(partyid string, userGroup string) string {
-	return fmt.Sprint("%s$%s", partyid, userGroup)
+	return fmt.Sprintf("%s$%s", partyid, userGroup)
 }
